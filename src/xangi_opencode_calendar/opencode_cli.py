@@ -95,10 +95,18 @@ class OpenCodeCli:
     def _time(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
-    def details(self, session_id: str, allowed: set[str] | None = None) -> dict:
+    def details(
+        self,
+        session_id: str,
+        allowed: set[str] | None = None,
+        metadata: dict[str, dict] | None = None,
+    ) -> dict:
         if not session_id.startswith("ses_") or "/" in session_id:
             raise RuntimeError("invalid session id")
-        allowed = allowed if allowed is not None else {item["id"] for item in self.sessions()["sessions"]}
+        if allowed is None:
+            listed = self.sessions()["sessions"]
+            allowed = {item["id"] for item in listed}
+            metadata = {item["id"]: item for item in listed}
         if session_id not in allowed:
             raise RuntimeError("session not found in workspace")
         value = self._run(["export", session_id, "--sanitize"])
@@ -107,6 +115,13 @@ class OpenCodeCli:
         info = value["info"]
         if info.get("id") != session_id or not isinstance(value.get("messages"), list):
             raise RuntimeError("OpenCode export has an invalid session shape")
+        item = metadata.get(session_id) if metadata else None
+        if item:
+            value["info"] = {
+                **info,
+                "title": item.get("title", ""),
+                "directory": item.get("directory", ""),
+            }
         return {"id": session_id, "export": value, "source": "opencode-cli"}
 
     def weekly(self, now: datetime | None = None, timezone_name: str | None = None) -> dict:
@@ -142,9 +157,10 @@ class OpenCodeCli:
             project["minutes"] += minutes
             total_minutes += minutes
         allowed = {item["id"] for item in sessions}
+        metadata = {item["id"]: item for item in sessions}
 
         def usage(item: dict) -> tuple[dict, float, dict]:
-            details = self.details(item["id"], allowed)["export"]["info"]
+            details = self.details(item["id"], allowed, metadata)["export"]["info"]
             cost = details.get("cost", 0)
             if not isinstance(cost, (int, float)) or isinstance(cost, bool) or not math.isfinite(cost):
                 raise RuntimeError("OpenCode export has an invalid cost")
