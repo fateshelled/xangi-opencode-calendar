@@ -24,6 +24,14 @@ GET /health
 GET /ui
 GET /api/sessions
 GET /api/sessions/{session_id}
+GET /api/calendar
+GET /api/weekly
 ```
 
 初期版は週表示とセッション詳細に対応します。コスト・トークンは詳細exportに含まれる場合だけ表示します。OpenCode CLIから取得できない情報は推測せず、省略します。
+
+週次サマリーは次で取得できます。
+
+```bash
+xangi extension weekly xangi-opencode-calendar
+```

@@ -4,10 +4,10 @@ import hmac
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .opencode_cli import OpenCodeCli
+from .opencode_cli import InvalidTimezoneError, OpenCodeCli
 
 
 def load_ui() -> str:
@@ -70,6 +70,28 @@ class CalendarHandler(BaseHTTPRequestHandler):
         if path == "/api/sessions":
             try:
                 self._json(200, self._sessions())
+            except RuntimeError as error:
+                self._json(502, {"error": str(error)})
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
+            return
+        if path == "/api/weekly":
+            try:
+                timezone_name = (parse_qs(urlparse(self.path).query).get("timezone") or ["UTC"])[0]
+                self._json(200, self.server.source.weekly(timezone_name=timezone_name))
+            except InvalidTimezoneError as error:
+                self._json(400, {"error": str(error)})
+            except RuntimeError as error:
+                self._json(502, {"error": str(error)})
+            except ValueError as error:
+                self._json(400, {"error": str(error)})
+            return
+        if path == "/api/calendar":
+            try:
+                timezone_name = (parse_qs(urlparse(self.path).query).get("timezone") or ["UTC"])[0]
+                self._json(200, self.server.source.calendar(timezone_name))
+            except InvalidTimezoneError as error:
+                self._json(400, {"error": str(error)})
             except RuntimeError as error:
                 self._json(502, {"error": str(error)})
             return

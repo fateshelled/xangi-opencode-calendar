@@ -5,6 +5,13 @@ import math
 import os
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+
+class InvalidTimezoneError(ValueError):
+    pass
 from pathlib import Path
 
 
@@ -88,10 +95,10 @@ class OpenCodeCli:
     def _time(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
-    def details(self, session_id: str) -> dict:
+    def details(self, session_id: str, allowed: set[str] | None = None) -> dict:
         if not session_id.startswith("ses_") or "/" in session_id:
             raise RuntimeError("invalid session id")
-        allowed = {item["id"] for item in self.sessions()["sessions"]}
+        allowed = allowed if allowed is not None else {item["id"] for item in self.sessions()["sessions"]}
         if session_id not in allowed:
             raise RuntimeError("session not found in workspace")
         value = self._run(["export", session_id, "--sanitize"])
@@ -101,3 +108,114 @@ class OpenCodeCli:
         if info.get("id") != session_id or not isinstance(value.get("messages"), list):
             raise RuntimeError("OpenCode export has an invalid session shape")
         return {"id": session_id, "export": value, "source": "opencode-cli"}
+
+    def weekly(self, now: datetime | None = None, timezone_name: str | None = None) -> dict:
+        name = timezone_name or "UTC"
+        try:
+            zone = ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise InvalidTimezoneError(f"invalid timezone: {name}") from error
+        current = now or datetime.now(zone)
+        current = current.replace(tzinfo=zone) if current.tzinfo is None else current.astimezone(zone)
+        monday = (current - timedelta(days=current.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        start = monday.timestamp() * 1000
+        end = (monday + timedelta(days=7)).timestamp() * 1000
+        listed = self.sessions()
+        sessions = [
+            item
+            for item in listed["sessions"]
+            if start <= item["start"] < end
+        ]
+        projects: dict[str, dict] = {}
+        total_minutes = 0
+        total_cost = 0.0
+        total_tokens = {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}
+        total_sessions = len(sessions)
+        for item in sessions:
+            minutes = max(0, round((item["end"] - item["start"]) / 60_000))
+            project = projects.setdefault(
+                item["project"], {"sessions": 0, "minutes": 0}
+            )
+            project["sessions"] += 1
+            project["minutes"] += minutes
+            total_minutes += minutes
+        allowed = {item["id"] for item in sessions}
+
+        def usage(item: dict) -> tuple[dict, float, dict]:
+            details = self.details(item["id"], allowed)["export"]["info"]
+            cost = details.get("cost", 0)
+            if not isinstance(cost, (int, float)) or isinstance(cost, bool) or not math.isfinite(cost):
+                raise RuntimeError("OpenCode export has an invalid cost")
+            tokens = details.get("tokens") or {}
+            if not isinstance(tokens, dict):
+                raise RuntimeError("OpenCode export has invalid tokens")
+            cache = tokens.get("cache") or {}
+            if not isinstance(cache, dict):
+                raise RuntimeError("OpenCode export has invalid token cache")
+            values = {key: tokens.get(key, 0) for key in ("input", "output", "reasoning")}
+            values["cache"] = {key: cache.get(key, 0) for key in ("read", "write")}
+            for value in (values["input"], values["output"], values["reasoning"], *values["cache"].values()):
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+                    raise RuntimeError("OpenCode export has invalid token values")
+            return values, cost, item
+
+        failed = 0
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(usage, item) for item in sessions]
+            usages = []
+            for future in as_completed(futures):
+                try:
+                    usages.append(future.result())
+                except RuntimeError:
+                    failed += 1
+        for tokens, cost, item in usages:
+            total_cost += cost
+            item["cost"] = cost
+            item["tokens"] = tokens
+            for key in ("input", "output", "reasoning"):
+                total_tokens[key] += tokens.get(key) or 0
+            cache = tokens.get("cache") or {}
+            total_tokens["cache"]["read"] += cache.get("read") or 0
+            total_tokens["cache"]["write"] += cache.get("write") or 0
+        return {
+            "from": monday.isoformat(),
+            "to": (monday + timedelta(days=7)).isoformat(),
+            "sessions": total_sessions,
+            "calendarSessions": sessions,
+            "minutes": total_minutes,
+            "cost": total_cost,
+            "tokens": total_tokens,
+            "projects": projects,
+            "truncated": listed["truncated"],
+            "degraded": failed > 0,
+            "failedSessions": failed,
+            "timezone": name,
+            "weekStarts": "Monday",
+        }
+
+    def calendar(self, timezone_name: str | None = None) -> dict:
+        name = timezone_name or "UTC"
+        try:
+            zone = ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise InvalidTimezoneError(f"invalid timezone: {name}") from error
+        current = datetime.now(zone)
+        monday = (current - timedelta(days=current.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        start = monday.timestamp() * 1000
+        end = (monday + timedelta(days=7)).timestamp() * 1000
+        listed = self.sessions()
+        sessions = [
+            item for item in listed["sessions"] if start <= item["start"] < end
+        ]
+        return {
+            "from": monday.isoformat(),
+            "to": (monday + timedelta(days=7)).isoformat(),
+            "timezone": name,
+            "sessions": sessions,
+            "truncated": listed["truncated"],
+            "degraded": False,
+        }
