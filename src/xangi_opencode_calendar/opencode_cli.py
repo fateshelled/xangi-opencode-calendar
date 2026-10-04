@@ -3,15 +3,22 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 class InvalidTimezoneError(ValueError):
     pass
+
+
+class InvalidDateError(ValueError):
+    pass
+
+
 from pathlib import Path
 
 
@@ -124,17 +131,37 @@ class OpenCodeCli:
             }
         return {"id": session_id, "export": value, "source": "opencode-cli"}
 
-    def weekly(self, now: datetime | None = None, timezone_name: str | None = None) -> dict:
-        name = timezone_name or "UTC"
+    @staticmethod
+    def _week_start(
+        now: datetime | None, timezone_name: str, date_name: str | None
+    ) -> tuple[ZoneInfo, datetime]:
         try:
-            zone = ZoneInfo(name)
+            zone = ZoneInfo(timezone_name)
         except (ZoneInfoNotFoundError, ValueError) as error:
-            raise InvalidTimezoneError(f"invalid timezone: {name}") from error
-        current = now or datetime.now(zone)
-        current = current.replace(tzinfo=zone) if current.tzinfo is None else current.astimezone(zone)
+            raise InvalidTimezoneError(f"invalid timezone: {timezone_name}") from error
+        if date_name is not None:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_name):
+                raise InvalidDateError(f"invalid date: {date_name}")
+            try:
+                current = datetime.combine(date.fromisoformat(date_name), datetime.min.time(), zone)
+            except ValueError as error:
+                raise InvalidDateError(f"invalid date: {date_name}") from error
+        else:
+            current = now or datetime.now(zone)
+            current = current.replace(tzinfo=zone) if current.tzinfo is None else current.astimezone(zone)
         monday = (current - timedelta(days=current.weekday())).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        return zone, monday
+
+    def weekly(
+        self,
+        now: datetime | None = None,
+        timezone_name: str | None = None,
+        date_name: str | None = None,
+    ) -> dict:
+        name = timezone_name or "UTC"
+        _, monday = self._week_start(now, name, date_name)
         start = monday.timestamp() * 1000
         end = (monday + timedelta(days=7)).timestamp() * 1000
         listed = self.sessions()
@@ -211,16 +238,11 @@ class OpenCodeCli:
             "weekStarts": "Monday",
         }
 
-    def calendar(self, timezone_name: str | None = None) -> dict:
+    def calendar(
+        self, timezone_name: str | None = None, date_name: str | None = None
+    ) -> dict:
         name = timezone_name or "UTC"
-        try:
-            zone = ZoneInfo(name)
-        except (ZoneInfoNotFoundError, ValueError) as error:
-            raise InvalidTimezoneError(f"invalid timezone: {name}") from error
-        current = datetime.now(zone)
-        monday = (current - timedelta(days=current.weekday())).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        _, monday = self._week_start(None, name, date_name)
         start = monday.timestamp() * 1000
         end = (monday + timedelta(days=7)).timestamp() * 1000
         listed = self.sessions()
