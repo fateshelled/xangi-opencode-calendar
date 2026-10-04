@@ -168,7 +168,7 @@ class OpenCodeCli:
         sessions = [
             item
             for item in listed["sessions"]
-            if start <= item["start"] < end
+            if item["start"] < end and item["end"] > start
         ]
         projects: dict[str, dict] = {}
         total_minutes = 0
@@ -176,7 +176,9 @@ class OpenCodeCli:
         total_tokens = {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}}
         total_sessions = len(sessions)
         for item in sessions:
-            minutes = max(0, round((item["end"] - item["start"]) / 60_000))
+            overlap_start = max(item["start"], start)
+            overlap_end = min(item["end"], end)
+            minutes = max(0, round((overlap_end - overlap_start) / 60_000))
             project = projects.setdefault(
                 item["project"], {"sessions": 0, "minutes": 0}
             )
@@ -247,7 +249,9 @@ class OpenCodeCli:
         end = (monday + timedelta(days=7)).timestamp() * 1000
         listed = self.sessions()
         sessions = [
-            item for item in listed["sessions"] if start <= item["start"] < end
+            item
+            for item in listed["sessions"]
+            if item["start"] < end and item["end"] > start
         ]
         return {
             "from": monday.isoformat(),
