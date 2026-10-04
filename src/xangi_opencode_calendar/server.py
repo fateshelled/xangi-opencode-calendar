@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import __version__
-from .opencode_cli import InvalidTimezoneError, OpenCodeCli
+from .opencode_cli import InvalidDateError, InvalidTimezoneError, OpenCodeCli
 
 
 def load_ui() -> str:
@@ -77,9 +77,11 @@ class CalendarHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/weekly":
             try:
-                timezone_name = (parse_qs(urlparse(self.path).query).get("timezone") or ["UTC"])[0]
-                self._json(200, self.server.source.weekly(timezone_name=timezone_name))
-            except InvalidTimezoneError as error:
+                query = parse_qs(urlparse(self.path).query)
+                timezone_name = (query.get("timezone") or ["UTC"])[0]
+                date_name = (query.get("date") or [None])[0]
+                self._json(200, self.server.source.weekly(timezone_name=timezone_name, date_name=date_name))
+            except (InvalidDateError, InvalidTimezoneError) as error:
                 self._json(400, {"error": str(error)})
             except RuntimeError as error:
                 self._json(502, {"error": str(error)})
@@ -88,9 +90,11 @@ class CalendarHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/calendar":
             try:
-                timezone_name = (parse_qs(urlparse(self.path).query).get("timezone") or ["UTC"])[0]
-                self._json(200, self.server.source.calendar(timezone_name))
-            except InvalidTimezoneError as error:
+                query = parse_qs(urlparse(self.path).query)
+                timezone_name = (query.get("timezone") or ["UTC"])[0]
+                date_name = (query.get("date") or [None])[0]
+                self._json(200, self.server.source.calendar(timezone_name, date_name))
+            except (InvalidDateError, InvalidTimezoneError) as error:
                 self._json(400, {"error": str(error)})
             except RuntimeError as error:
                 self._json(502, {"error": str(error)})
