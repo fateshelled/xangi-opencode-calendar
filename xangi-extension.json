@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "id": "xangi-opencode-calendar",
+  "displayName": "xangi-opencode-calendar",
+  "description": "OpenCodeのセッション履歴をローカルのカレンダー形式で表示します。",
+  "permissions": [
+    "OpenCode公式CLIによるセッション履歴の読み取り",
+    "ワークスペース内のセッション情報の表示",
+    "localhostでカレンダーUIを起動"
+  ],
+  "version": "0.1.0",
+  "entrypoint": ".venv/bin/xangi-opencode-calendar-extension",
+  "runtime": {
+    "kind": "managed-http"
+  },
+  "setup": {
+    "instructions": "XANGI_SETUP.md"
+  },
+  "ui": {
+    "capability": "workspace.opencode-calendar",
+    "path": "/ui"
+  },
+  "capabilities": [
+    {
+      "id": "workspace.opencode-calendar",
+      "protocol": "http",
+      "healthPath": "/health"
+    }
+  ]
+}

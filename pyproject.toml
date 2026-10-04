@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xangi-opencode-calendar"
+version = "0.1.0"
+description = "Local OpenCode session calendar extension for xangi"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+xangi-opencode-calendar-extension = "xangi_opencode_calendar.extension:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xangi_opencode_calendar"]

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCode Calendar</title>
+  <style>
+    :root { color-scheme: dark; --bg: #111318; --panel: #1b1f29; --line: #303747; --ink: #e9edf5; --muted: #98a2b3; --accent: #8ed0ff; }
+    * { box-sizing: border-box; } body { margin: 0; background: var(--bg); color: var(--ink); font: 14px system-ui, sans-serif; }
+    header { padding: 22px 28px 14px; border-bottom: 1px solid var(--line); } h1 { margin: 0 0 6px; font-size: 22px; } p { color: var(--muted); margin: 0; }
+    main { padding: 22px 28px; overflow-x: auto; } .toolbar { display: flex; gap: 12px; margin-bottom: 18px; align-items: center; } select, button { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+    .week { min-width: 820px; display: grid; grid-template-columns: 72px repeat(7, minmax(110px, 1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+    .cell { min-height: 72px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px; } .head { min-height: auto; color: var(--accent); font-weight: 650; } .hour { color: var(--muted); text-align: right; }
+    .session { display: block; margin: 4px 0; padding: 7px; border-left: 3px solid var(--accent); border-radius: 4px; background: #23364a; cursor: pointer; } .session strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .session small { color: #b9d6e8; }
+    dialog { max-width: 720px; width: calc(100% - 32px); background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 20px; } dialog::backdrop { background: #0009; } pre { white-space: pre-wrap; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header><h1>OpenCode Calendar</h1><p>ローカルのOpenCodeセッションを読み取り専用で表示</p></header>
+  <main><div class="toolbar"><button id="reload">再読み込み</button><span id="meta">読み込み中...</span></div><div id="calendar"></div></main>
+  <dialog id="detail"><button onclick="detail.close()">閉じる</button><div id="detail-body"></div></dialog>
+  <script>
+    const calendar = document.querySelector('#calendar'), meta = document.querySelector('#meta'), detail = document.querySelector('#detail'), body = document.querySelector('#detail-body');
+    const days = ['日','月','火','水','木','金','土'];
+    function dayStart(date) { const copy = new Date(date); copy.setHours(0,0,0,0); copy.setDate(copy.getDate() - copy.getDay()); return copy; }
+    function money(value) { return typeof value === 'number' ? `$${value.toFixed(2)}` : '-'; }
+    const serviceBase = location.pathname.startsWith('/api/extensions/') ? location.pathname.replace(/\/ui\/?$/, '/service') : '';
+    async function load() { const response = await fetch(serviceBase + '/api/sessions'); const data = await response.json(); if (!response.ok) throw new Error(data.error || '取得に失敗しました'); render(data); }
+    function render(data) { const now = new Date(), first = dayStart(now), cells = Array.from({length: 7}, (_, index) => new Date(first.getTime() + index * 86400000)); let html = '<div class="week"><div class="cell head"></div>' + cells.map((date) => `<div class="cell head">${days[date.getDay()]} ${date.getMonth()+1}/${date.getDate()}</div>`).join(''); for (let hour = 0; hour < 24; hour++) { html += `<div class="cell hour">${String(hour).padStart(2,'0')}:00</div>` + cells.map((date) => { const items = data.sessions.filter((session) => { const start = new Date(session.start); return start.toDateString() === date.toDateString() && start.getHours() === hour; }); return `<div class="cell">${items.map((session) => `<div class="session" data-id="${escapeHtml(session.id)}"><strong>${escapeHtml(session.title || '(無題)')}</strong><small>${escapeHtml(session.project)} · ${escapeHtml(session.status)}</small></div>`).join('')}</div>`; }).join(''); } calendar.innerHTML = html + '</div>'; meta.textContent = `${data.sessions.length} sessions${data.truncated ? ' · 5000件で打ち切り' : ''}${data.degraded ? ' · status degraded' : ''}`; document.querySelectorAll('.session').forEach((item) => item.onclick = () => show(item.dataset.id)); }
+    async function show(id) { const response = await fetch(serviceBase + '/api/sessions/' + encodeURIComponent(id)); const data = await response.json(); if (!response.ok) throw new Error(data.error || '詳細の取得に失敗しました'); body.innerHTML = `<h2>${escapeHtml(id)}</h2><pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`; detail.showModal(); }
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
+    document.querySelector('#reload').onclick = () => load().catch((error) => { meta.textContent = error.message; }); load().catch((error) => { meta.textContent = error.message; });
+  </script>
+</body>
+</html>
